@@ -6,9 +6,11 @@ from datetime import datetime
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BusinessConnection
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+# BusinessConnection импортируем отдельно, если нужно
+from aiogram.types import BusinessConnection
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
