@@ -10,7 +10,7 @@ print(f"✅ aiogram version: {aiogram.__version__}")
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BusinessConnection
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BusinessConnection, BusinessMessagesDeleted
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 load_dotenv()
@@ -108,11 +108,7 @@ def get_main_keyboard():
 async def start(message: types.Message):
     await message.answer(
         "👋 **Привет! Я MGP3 бот для отслеживания удаленных сообщений!**\n\n"
-        "Я сохраняю все сообщения из твоих личных чатов, и если собеседник "
-        "удалит или изменит сообщение — я пришлю тебе его оригинальный текст.\n\n"
-        "**Как меня настроить:**\n"
-        "1️⃣ Нажми кнопку ниже «Подключить к Business API»\n"
-        "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n\n"
+        "Я сохраняю все сообщения из твоих личных чатов.\n\n"
         "⬇️ Нажми на кнопки ниже для настройки",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
@@ -121,11 +117,9 @@ async def start(message: types.Message):
 @dp.callback_query(F.data == "instructions")
 async def show_instructions(callback: types.CallbackQuery):
     await callback.message.edit_text(
-        "📖 **Инструкция по настройке**\n\n"
-        "**Шаг 1:** Нажми «Подключить к Business API»\n"
-        "**Шаг 2:** В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-        "**Шаг 3:** Нажми «Проверить подключение»\n\n"
-        "⚠️ Бот сохраняет сообщения ТОЛЬКО после подключения.",
+        "📖 **Инструкция**\n\n"
+        "1. Нажми «Подключить к Business API»\n"
+        "2. В Telegram: Настройки → Telegram Business → Chatbots → добавь бота",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
@@ -152,25 +146,19 @@ async def check_connection(callback: types.CallbackQuery):
         await callback.message.answer("❌ **Подключение не найдено**")
     await callback.answer()
 
-# ==================== BUSINESS API (РАБОТАЕТ В 3.5+) ====================
+# ==================== BUSINESS API ====================
 
 @dp.business_connection()
 async def on_business_connection(connection: BusinessConnection):
-    """Обработчик бизнес-подключения"""
     user_id = connection.user_id
     save_connection(user_id, connection.connection_id)
     await bot.send_message(
         chat_id=user_id,
-        text=(
-            "🔔 **Бизнес-подключение установлено!**\n\n"
-            f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            "Теперь я сохраняю все сообщения из твоих чатов. 🚀"
-        )
+        text=f"🔔 **Бизнес-подключение установлено!**\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
     )
 
 @dp.business_message()
 async def handle_business_message(message: types.Message):
-    """Сохраняет новые бизнес-сообщения"""
     user_id = message.from_user.id
     text = message.text or message.caption
     
@@ -186,62 +174,32 @@ async def handle_business_message(message: types.Message):
     elif message.document:
         media_type = "document"
         media_id = message.document.file_id
-    elif message.voice:
-        media_type = "voice"
-        media_id = message.voice.file_id
-    elif message.audio:
-        media_type = "audio"
-        media_id = message.audio.file_id
-    elif message.sticker:
-        media_type = "sticker"
-        media_id = message.sticker.file_id
     
     save_message(user_id, message.message_id, message.chat.id, text, media_type, media_id)
 
 @dp.edited_business_message()
 async def handle_edited_business_message(message: types.Message):
-    """Обрабатывает изменения сообщений"""
     user_id = message.from_user.id
     old_data = get_message(user_id, message.message_id, message.chat.id)
     
     if old_data:
-        old_text, old_media_type, old_media_id = old_data
-        
-        notification = (
-            "✏️ **Сообщение изменено!**\n\n"
-            f"**Было:**\n{old_text or 'Медиа'}\n\n"
-            f"**Стало:**\n{message.text or message.caption or 'Медиа'}"
+        old_text, _, _ = old_data
+        await bot.send_message(
+            user_id,
+            f"✏️ **Сообщение изменено!**\n\nБыло: {old_text or 'Медиа'}\nСтало: {message.text or message.caption or 'Медиа'}"
         )
-        
-        await bot.send_message(user_id, notification)
-        
-        save_message(
-            user_id=user_id,
-            message_id=message.message_id,
-            chat_id=message.chat.id,
-            text=message.text or message.caption,
-            media_type=old_media_type,
-            media_id=old_media_id
-        )
+        save_message(user_id, message.message_id, message.chat.id, message.text or message.caption)
 
 @dp.business_messages_deleted()
-async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
-    """Обрабатывает удаление сообщений"""
+async def handle_deleted_business_messages(event: BusinessMessagesDeleted):
     user_id = event.user_id
     chat_id = event.chat.id
     
     for msg_id in event.message_ids:
         old_data = get_message(user_id, msg_id, chat_id)
-        
         if old_data:
-            text, media_type, media_id = old_data
-            
-            notification = (
-                "🗑️ **Сообщение удалено!**\n\n"
-                f"**Текст:**\n{text or 'Медиа'}"
-            )
-            
-            await bot.send_message(user_id, notification)
+            text, _, _ = old_data
+            await bot.send_message(user_id, f"🗑️ **Сообщение удалено!**\n\nТекст: {text or 'Медиа'}")
             delete_message(user_id, msg_id, chat_id)
 
 # ==================== ЗАПУСК ====================
