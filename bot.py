@@ -18,7 +18,9 @@ except ImportError:
     print("❌ aiogram не установлен!")
     sys.exit(1)
 
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, types, F
+from aiogram.dispatcher import Dispatcher
+from aiogram.dispatcher.router import Router
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
