@@ -102,22 +102,19 @@ def get_main_keyboard():
     keyboard.row(InlineKeyboardButton(text="🔗 Подключить к Business API", url="https://t.me/BotFather?start=set_business"))
     keyboard.row(InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions"))
     keyboard.row(InlineKeyboardButton(text="✅ Проверить подключение", callback_data="check_connection"))
-    keyboard.row(InlineKeyboardButton(text="🔄 Переподключить", callback_data="reconnect"))
+    keyboard.row(InlineKeyboardButton(text="🔄 Сбросить подключение", callback_data="reset_connection"))
     return keyboard.as_markup()
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
         "👋 **Привет! Я MGP3 бот для отслеживания удаленных сообщений!**\n\n"
-        "Я сохраняю все сообщения из твоих личных чатов, и если собеседник "
-        "удалит или изменит сообщение — я пришлю тебе его оригинальный текст.\n\n"
-        "**Как меня настроить:**\n"
-        "1️⃣ Нажми кнопку ниже «Подключить к Business API»\n"
-        "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-        "3️⃣ Нажми «Проверить подключение»\n\n"
-        "⚠️ Если подключение не определяется — нажми «Переподключить»\n"
-        "и следуй инструкции.\n\n"
-        "⬇️ Нажми на кнопки ниже для настройки",
+        "**Как подключить:**\n"
+        "1️⃣ Нажми «Подключить к Business API»\n"
+        "2️⃣ В Telegram: Профиль → Автоматизация чатов → Добавить бота\n"
+        "3️⃣ Выбери этого бота и разреши доступ\n"
+        "4️⃣ Нажми «Проверить подключение»\n\n"
+        "⬇️ Нажми на кнопки ниже",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
@@ -127,14 +124,10 @@ async def show_instructions(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "📖 **Инструкция по настройке**\n\n"
         "**Шаг 1:** Нажми «Подключить к Business API»\n"
-        "**Шаг 2:** В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-        "**Шаг 3:** Нажми «Проверить подключение»\n\n"
-        "**Если не работает:**\n"
-        "1️⃣ Нажми «Переподключить»\n"
-        "2️⃣ Удали бота из Telegram Business → Chatbots\n"
-        "3️⃣ Снова добавь его туда\n"
-        "4️⃣ Нажми «Проверить подключение»\n\n"
-        "⚠️ Бот сохраняет сообщения ТОЛЬКО после подключения.",
+        "**Шаг 2:** В Telegram: Профиль → Автоматизация чатов → Добавить бота\n"
+        "**Шаг 3:** Выбери этого бота и разреши доступ ко всем чатам\n"
+        "**Шаг 4:** Нажми «Проверить подключение»\n\n"
+        "⚠️ Если не работает — нажми «Сбросить подключение» и повтори шаги",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
@@ -156,36 +149,32 @@ async def check_connection(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     connection_id = get_connection_id(user_id)
     if connection_id:
-        await callback.message.answer("✅ **Подключение активно!**\n\nЯ уже сохраняю все сообщения из твоих чатов.")
+        await callback.message.answer("✅ **Подключение активно!**\n\nЯ сохраняю все сообщения из твоих чатов.")
     else:
         await callback.message.answer(
             "❌ **Подключение не найдено**\n\n"
-            "Попробуй переподключить бота:\n"
-            "1️⃣ Нажми кнопку «Переподключить»\n"
-            "2️⃣ Удали бота из Telegram Business → Chatbots\n"
-            "3️⃣ Снова добавь его туда\n"
-            "4️⃣ Затем нажми «Проверить подключение» снова"
+            "Сделай:\n"
+            "1️⃣ Нажми «Сбросить подключение»\n"
+            "2️⃣ В Telegram: Профиль → Автоматизация чатов → удали бота\n"
+            "3️⃣ Снова добавь бота\n"
+            "4️⃣ Нажми «Проверить подключение»"
         )
     await callback.answer()
 
-@dp.callback_query(F.data == "reconnect")
-async def reconnect_bot(callback: types.CallbackQuery):
+@dp.callback_query(F.data == "reset_connection")
+async def reset_connection(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    
-    # Удаляем старую запись о подключении
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
     c.execute("DELETE FROM user_connections WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
-    
     await callback.message.answer(
-        "🔄 **Старое подключение сброшено!**\n\n"
-        "Теперь сделай:\n"
-        "1️⃣ Удали бота из Telegram Business → Chatbots\n"
-        "2️⃣ Снова добавь его туда\n"
-        "3️⃣ Нажми «Проверить подключение»\n\n"
-        "⚠️ Бот должен быть запущен во время подключения!"
+        "🔄 **Подключение сброшено!**\n\n"
+        "Теперь:\n"
+        "1️⃣ Удали бота из Профиль → Автоматизация чатов\n"
+        "2️⃣ Снова добавь его\n"
+        "3️⃣ Нажми «Проверить подключение»"
     )
     await callback.answer()
 
@@ -193,36 +182,24 @@ async def reconnect_bot(callback: types.CallbackQuery):
 
 @dp.business_connection()
 async def on_business_connection(connection: BusinessConnection):
-    """Обработчик бизнес-подключения - срабатывает при подключении"""
     user_id = connection.user_id
     save_connection(user_id, connection.connection_id)
-    
     await bot.send_message(
         chat_id=user_id,
-        text=(
-            "🔔 **Бизнес-подключение установлено!**\n\n"
-            f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            "Теперь я сохраняю все сообщения из твоих чатов. 🚀\n\n"
-            "✅ Нажми «Проверить подключение» - должно показать активно!"
-        )
+        text="🔔 **Бизнес-подключение установлено!**\n\nТеперь я сохраняю все сообщения из твоих чатов. 🚀"
     )
 
 @dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
-    """Сохраняет новые бизнес-сообщения"""
     if not message.business_message:
         return
     
     user_id = message.from_user.id
     
-    # Если connection_id есть в сообщении - сохраняем
+    # В aiogram 3.18+ бизнес-сообщения содержат business_connection_id
     if hasattr(message, 'business_connection_id') and message.business_connection_id:
         if not get_connection_id(user_id):
             save_connection(user_id, message.business_connection_id)
-            await bot.send_message(
-                chat_id=user_id,
-                text="🔔 **Бизнес-подключение подтверждено!**\n\nТеперь я сохраняю все сообщения из твоих чатов. 🚀"
-            )
     
     text = message.text or message.caption
     
@@ -257,103 +234,68 @@ async def handle_business_message(message: types.Message):
         media_id=media_id
     )
 
-# ==================== MIDDLEWARE ДЛЯ ИЗМЕНЕНИЙ И УДАЛЕНИЙ ====================
+# ==================== ОБРАБОТЧИКИ ИЗМЕНЕНИЙ И УДАЛЕНИЙ ====================
 
-@dp.update.outer_middleware
-async def business_middleware(handler, event: types.Update, data: dict):
-    """
-    Обрабатывает изменения и удаления через middleware
-    """
+@dp.edited_business_message()
+async def handle_edited_business_message(message: types.Message):
+    """Обрабатывает изменения сообщений (доступно в aiogram 3.18+)"""
+    user_id = message.from_user.id
     
-    # Измененные сообщения
-    if hasattr(event, 'edited_business_message') and event.edited_business_message:
-        message = event.edited_business_message
-        user_id = message.from_user.id
-        
+    if hasattr(message, 'business_connection_id') and message.business_connection_id:
         if not get_connection_id(user_id):
-            if hasattr(message, 'business_connection_id') and message.business_connection_id:
-                save_connection(user_id, message.business_connection_id)
+            save_connection(user_id, message.business_connection_id)
+    
+    old_data = get_message(user_id, message.message_id, message.chat.id)
+    
+    if old_data:
+        old_text, old_media_type, old_media_id = old_data
         
-        old_data = get_message(user_id, message.message_id, message.chat.id)
+        notification = (
+            "✏️ **Сообщение было изменено!**\n\n"
+            f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
+            f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}"
+        )
+        
+        await bot.send_message(user_id, notification)
+        
+        save_message(
+            user_id=user_id,
+            message_id=message.message_id,
+            chat_id=message.chat.id,
+            text=message.text or message.caption,
+            media_type=old_media_type,
+            media_id=old_media_id
+        )
+
+@dp.business_messages_deleted()
+async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
+    """Обрабатывает удаление сообщений (доступно в aiogram 3.18+)"""
+    user_id = event.user_id
+    chat_id = event.chat.id
+    
+    if hasattr(event, 'business_connection_id') and event.business_connection_id:
+        if not get_connection_id(user_id):
+            save_connection(user_id, event.business_connection_id)
+    
+    for msg_id in event.message_ids:
+        old_data = get_message(user_id, msg_id, chat_id)
         
         if old_data:
-            old_text, old_media_type, old_media_id = old_data
+            text, media_type, media_id = old_data
             
             notification = (
-                "✏️ **Сообщение было изменено!**\n\n"
-                f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
-                f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}\n\n"
-                f"Чат: {message.chat.id}\n"
-                f"ID сообщения: {message.message_id}"
+                "🗑️ **Сообщение было удалено!**\n\n"
+                f"**Текст:**\n{text or 'Медиафайл'}"
             )
             
             await bot.send_message(user_id, notification)
-            
-            save_message(
-                user_id=user_id,
-                message_id=message.message_id,
-                chat_id=message.chat.id,
-                text=message.text or message.caption,
-                media_type=old_media_type,
-                media_id=old_media_id
-            )
-        return
-    
-    # Удаленные сообщения
-    if hasattr(event, 'business_messages_deleted') and event.business_messages_deleted:
-        ev = event.business_messages_deleted
-        user_id = ev.user_id
-        chat_id = ev.chat.id
-        
-        if not get_connection_id(user_id):
-            if hasattr(ev, 'business_connection_id') and ev.business_connection_id:
-                save_connection(user_id, ev.business_connection_id)
-        
-        for msg_id in ev.message_ids:
-            old_data = get_message(user_id, msg_id, chat_id)
-            
-            if old_data:
-                text, media_type, media_id = old_data
-                
-                notification = (
-                    "🗑️ **Сообщение было удалено!**\n\n"
-                    f"**Текст:**\n{text or 'Медиафайл'}\n\n"
-                    f"**Тип медиа:** {media_type or 'Нет'}\n"
-                    f"Чат: {chat_id}\n"
-                    f"ID сообщения: {msg_id}"
-                )
-                
-                if media_id:
-                    try:
-                        if media_type == "photo":
-                            await bot.send_photo(user_id, media_id, caption=text)
-                        elif media_type == "video":
-                            await bot.send_video(user_id, media_id, caption=text)
-                        elif media_type == "document":
-                            await bot.send_document(user_id, media_id, caption=text)
-                        elif media_type == "voice":
-                            await bot.send_voice(user_id, media_id, caption=text)
-                        elif media_type == "audio":
-                            await bot.send_audio(user_id, media_id, caption=text)
-                        else:
-                            await bot.send_message(user_id, notification)
-                    except Exception as e:
-                        logging.error(f"Ошибка отправки медиа: {e}")
-                        await bot.send_message(user_id, notification)
-                else:
-                    await bot.send_message(user_id, notification)
-                
-                delete_message(user_id, msg_id, chat_id)
-        return
-    
-    return await handler(event, data)
+            delete_message(user_id, msg_id, chat_id)
 
 # ==================== ЗАПУСК ====================
 
 async def main():
     init_db()
-    logging.info("🚀 MGP3 бот запущен!")
-    logging.info("⚠️ Если подключение не определяется - нажми кнопку 'Переподключить'")
+    logging.info("🚀 MGP3 бот запущен на aiogram 3.18+!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
