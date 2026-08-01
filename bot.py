@@ -10,7 +10,7 @@ print(f"✅ aiogram version: {aiogram.__version__}")
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BusinessConnection, BusinessMessagesDeleted
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BusinessConnection
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 load_dotenv()
@@ -146,11 +146,10 @@ async def check_connection(callback: types.CallbackQuery):
         await callback.message.answer("❌ **Подключение не найдено**")
     await callback.answer()
 
-# ==================== BUSINESS API (ПРАВИЛЬНЫЙ СИНТАКСИС) ====================
+# ==================== BUSINESS API ====================
 
 @dp.business_connection()
 async def on_business_connection(connection: BusinessConnection):
-    """Обработчик бизнес-подключения"""
     user_id = connection.user_id
     save_connection(user_id, connection.connection_id)
     await bot.send_message(
@@ -160,7 +159,6 @@ async def on_business_connection(connection: BusinessConnection):
 
 @dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
-    """Сохраняет новые бизнес-сообщения"""
     if not message.business_message:
         return
     
@@ -182,15 +180,10 @@ async def handle_business_message(message: types.Message):
     
     save_message(user_id, message.message_id, message.chat.id, text, media_type, media_id)
 
-# ВНИМАНИЕ: В aiogram 3.17.0 нет декораторов для edited и deleted!
-# Используем middleware для их обработки
+# ==================== MIDDLEWARE ДЛЯ ИЗМЕНЕНИЙ И УДАЛЕНИЙ ====================
 
 @dp.update.outer_middleware
 async def business_middleware(handler, event: types.Update, data: dict):
-    """
-    Обрабатываем изменения и удаления через middleware
-    """
-    
     # Измененные сообщения
     if hasattr(event, 'edited_business_message') and event.edited_business_message:
         message = event.edited_business_message
