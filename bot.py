@@ -146,10 +146,11 @@ async def check_connection(callback: types.CallbackQuery):
         await callback.message.answer("❌ **Подключение не найдено**")
     await callback.answer()
 
-# ==================== BUSINESS API ====================
+# ==================== BUSINESS API (ПРАВИЛЬНЫЙ СИНТАКСИС) ====================
 
 @dp.business_connection()
 async def on_business_connection(connection: BusinessConnection):
+    """Обработчик бизнес-подключения"""
     user_id = connection.user_id
     save_connection(user_id, connection.connection_id)
     await bot.send_message(
@@ -157,8 +158,12 @@ async def on_business_connection(connection: BusinessConnection):
         text=f"🔔 **Бизнес-подключение установлено!**\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
     )
 
-@dp.business_message()
+@dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
+    """Сохраняет новые бизнес-сообщения"""
+    if not message.business_message:
+        return
+    
     user_id = message.from_user.id
     text = message.text or message.caption
     
@@ -177,30 +182,48 @@ async def handle_business_message(message: types.Message):
     
     save_message(user_id, message.message_id, message.chat.id, text, media_type, media_id)
 
-@dp.edited_business_message()
-async def handle_edited_business_message(message: types.Message):
-    user_id = message.from_user.id
-    old_data = get_message(user_id, message.message_id, message.chat.id)
-    
-    if old_data:
-        old_text, _, _ = old_data
-        await bot.send_message(
-            user_id,
-            f"✏️ **Сообщение изменено!**\n\nБыло: {old_text or 'Медиа'}\nСтало: {message.text or message.caption or 'Медиа'}"
-        )
-        save_message(user_id, message.message_id, message.chat.id, message.text or message.caption)
+# ВНИМАНИЕ: В aiogram 3.17.0 нет декораторов для edited и deleted!
+# Используем middleware для их обработки
 
-@dp.business_messages_deleted()
-async def handle_deleted_business_messages(event: BusinessMessagesDeleted):
-    user_id = event.user_id
-    chat_id = event.chat.id
+@dp.update.outer_middleware
+async def business_middleware(handler, event: types.Update, data: dict):
+    """
+    Обрабатываем изменения и удаления через middleware
+    """
     
-    for msg_id in event.message_ids:
-        old_data = get_message(user_id, msg_id, chat_id)
+    # Измененные сообщения
+    if hasattr(event, 'edited_business_message') and event.edited_business_message:
+        message = event.edited_business_message
+        user_id = message.from_user.id
+        old_data = get_message(user_id, message.message_id, message.chat.id)
+        
         if old_data:
-            text, _, _ = old_data
-            await bot.send_message(user_id, f"🗑️ **Сообщение удалено!**\n\nТекст: {text or 'Медиа'}")
-            delete_message(user_id, msg_id, chat_id)
+            old_text, _, _ = old_data
+            await bot.send_message(
+                user_id,
+                f"✏️ **Сообщение изменено!**\n\nБыло: {old_text or 'Медиа'}\nСтало: {message.text or message.caption or 'Медиа'}"
+            )
+            save_message(user_id, message.message_id, message.chat.id, message.text or message.caption)
+        return
+    
+    # Удаленные сообщения
+    if hasattr(event, 'business_messages_deleted') and event.business_messages_deleted:
+        ev = event.business_messages_deleted
+        user_id = ev.user_id
+        chat_id = ev.chat.id
+        
+        for msg_id in ev.message_ids:
+            old_data = get_message(user_id, msg_id, chat_id)
+            if old_data:
+                text, _, _ = old_data
+                await bot.send_message(
+                    user_id,
+                    f"🗑️ **Сообщение удалено!**\n\nТекст: {text or 'Медиа'}"
+                )
+                delete_message(user_id, msg_id, chat_id)
+        return
+    
+    return await handler(event, data)
 
 # ==================== ЗАПУСК ====================
 
