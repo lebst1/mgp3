@@ -122,12 +122,6 @@ async def start(message: types.Message):
         "1️⃣ Нажми кнопку ниже «Подключить к Business API»\n"
         "2️⃣ Выбери свой аккаунт и разреши доступ\n"
         "3️⃣ Я автоматически начну сохранять сообщения\n\n"
-        "**Что я умею:**\n"
-        "✅ Сохранять текст сообщений\n"
-        "✅ Сохранять фото и видео\n"
-        "✅ Отслеживать удаление сообщений\n"
-        "✅ Отслеживать изменение сообщений\n"
-        "✅ Отправлять уведомления тебе в ЛС\n\n"
         "⬇️ Нажми на кнопки ниже для настройки"
     )
     await message.answer(welcome_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -164,22 +158,14 @@ async def check_connection(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     connection_id = get_connection_id(user_id)
     if connection_id:
-        await callback.message.answer(
-            "✅ **Подключение активно!**\n\n"
-            "Я уже сохраняю все сообщения из твоих чатов."
-        )
+        await callback.message.answer("✅ **Подключение активно!**")
     else:
-        await callback.message.answer(
-            "❌ **Подключение не найдено**\n\n"
-            "Чтобы подключить бота:\n"
-            "1️⃣ Нажми «Подключить к Business API»\n"
-            "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота"
-        )
+        await callback.message.answer("❌ **Подключение не найдено**")
     await callback.answer()
 
 # ==================== ОБРАБОТЧИКИ BUSINESS API ====================
 
-# Middleware для обработки бизнес-подключений
+# 1. Обработчик бизнес-подключений
 @dp.update.outer_middleware
 async def business_connection_middleware(update: types.Update, handler):
     """Обработчик бизнес-подключений через middleware"""
@@ -195,15 +181,13 @@ async def business_connection_middleware(update: types.Update, handler):
                 "Теперь я сохраняю все сообщения из твоих чатов. 🚀"
             )
         )
+        return
     return await handler(update)
 
-# Обработчик бизнес-сообщений (новые сообщения)
+# 2. Обработчик бизнес-сообщений (новые сообщения)
 @dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
     """Сохраняет все бизнес-сообщения"""
-    if not message.business_message:
-        return
-    
     user_id = message.from_user.id
     text = message.text or message.caption
     
@@ -225,12 +209,6 @@ async def handle_business_message(message: types.Message):
     elif message.audio:
         media_type = "audio"
         media_id = message.audio.file_id
-    elif message.sticker:
-        media_type = "sticker"
-        media_id = message.sticker.file_id
-    elif message.animation:
-        media_type = "gif"
-        media_id = message.animation.file_id
     
     save_message(
         user_id=user_id,
@@ -241,78 +219,86 @@ async def handle_business_message(message: types.Message):
         media_id=media_id
     )
 
-# Обработчик измененных сообщений
-@dp.edited_business_message()
-async def handle_edited_business_message(message: types.Message):
-    """Обрабатывает изменения сообщений"""
-    user_id = message.from_user.id
-    old_data = get_message(user_id, message.message_id, message.chat.id)
-    
-    if old_data:
-        old_text, old_media_type, old_media_id = old_data
-        
-        notification = (
-            "✏️ **Сообщение было изменено!**\n\n"
-            f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
-            f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}\n\n"
-            f"Чат: {message.chat.id}\n"
-            f"ID сообщения: {message.message_id}"
-        )
-        
-        await bot.send_message(user_id, notification)
-        
-        save_message(
-            user_id=user_id,
-            message_id=message.message_id,
-            chat_id=message.chat.id,
-            text=message.text or message.caption,
-            media_type=old_media_type,
-            media_id=old_media_id
-        )
-
-# Обработчик удаленных сообщений
-@dp.business_messages_deleted()
-async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
-    """Обрабатывает удаление сообщений"""
-    user_id = event.user_id
-    chat_id = event.chat.id
-    deleted_ids = event.message_ids
-    
-    for msg_id in deleted_ids:
-        old_data = get_message(user_id, msg_id, chat_id)
+# 3. Обработчик измененных сообщений (через middleware)
+@dp.update.outer_middleware
+async def edited_business_message_middleware(update: types.Update, handler):
+    """Обработчик измененных бизнес-сообщений через middleware"""
+    if update.edited_business_message:
+        message = update.edited_business_message
+        user_id = message.from_user.id
+        old_data = get_message(user_id, message.message_id, message.chat.id)
         
         if old_data:
-            text, media_type, media_id = old_data
+            old_text, old_media_type, old_media_id = old_data
             
             notification = (
-                "🗑️ **Сообщение было удалено!**\n\n"
-                f"**Текст:**\n{text or 'Медиафайл'}\n\n"
-                f"**Тип медиа:** {media_type or 'Нет'}\n"
-                f"Чат: {chat_id}\n"
-                f"ID сообщения: {msg_id}"
+                "✏️ **Сообщение было изменено!**\n\n"
+                f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
+                f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}\n\n"
+                f"Чат: {message.chat.id}\n"
+                f"ID сообщения: {message.message_id}"
             )
             
-            if media_id:
-                try:
-                    if media_type == "photo":
-                        await bot.send_photo(user_id, media_id, caption=text)
-                    elif media_type == "video":
-                        await bot.send_video(user_id, media_id, caption=text)
-                    elif media_type == "document":
-                        await bot.send_document(user_id, media_id, caption=text)
-                    elif media_type == "voice":
-                        await bot.send_voice(user_id, media_id, caption=text)
-                    elif media_type == "audio":
-                        await bot.send_audio(user_id, media_id, caption=text)
-                    else:
-                        await bot.send_message(user_id, notification)
-                except Exception as e:
-                    logging.error(f"Ошибка отправки медиа: {e}")
-                    await bot.send_message(user_id, notification)
-            else:
-                await bot.send_message(user_id, notification)
+            await bot.send_message(user_id, notification)
             
-            delete_message(user_id, msg_id, chat_id)
+            save_message(
+                user_id=user_id,
+                message_id=message.message_id,
+                chat_id=message.chat.id,
+                text=message.text or message.caption,
+                media_type=old_media_type,
+                media_id=old_media_id
+            )
+        return
+    return await handler(update)
+
+# 4. Обработчик удаленных сообщений (через middleware)
+@dp.update.outer_middleware
+async def deleted_business_messages_middleware(update: types.Update, handler):
+    """Обработчик удаленных бизнес-сообщений через middleware"""
+    if update.business_messages_deleted:
+        event = update.business_messages_deleted
+        user_id = event.user_id
+        chat_id = event.chat.id
+        deleted_ids = event.message_ids
+        
+        for msg_id in deleted_ids:
+            old_data = get_message(user_id, msg_id, chat_id)
+            
+            if old_data:
+                text, media_type, media_id = old_data
+                
+                notification = (
+                    "🗑️ **Сообщение было удалено!**\n\n"
+                    f"**Текст:**\n{text or 'Медиафайл'}\n\n"
+                    f"**Тип медиа:** {media_type or 'Нет'}\n"
+                    f"Чат: {chat_id}\n"
+                    f"ID сообщения: {msg_id}"
+                )
+                
+                if media_id:
+                    try:
+                        if media_type == "photo":
+                            await bot.send_photo(user_id, media_id, caption=text)
+                        elif media_type == "video":
+                            await bot.send_video(user_id, media_id, caption=text)
+                        elif media_type == "document":
+                            await bot.send_document(user_id, media_id, caption=text)
+                        elif media_type == "voice":
+                            await bot.send_voice(user_id, media_id, caption=text)
+                        elif media_type == "audio":
+                            await bot.send_audio(user_id, media_id, caption=text)
+                        else:
+                            await bot.send_message(user_id, notification)
+                    except Exception as e:
+                        logging.error(f"Ошибка отправки медиа: {e}")
+                        await bot.send_message(user_id, notification)
+                else:
+                    await bot.send_message(user_id, notification)
+                
+                delete_message(user_id, msg_id, chat_id)
+        return
+    return await handler(update)
 
 # ==================== ЗАПУСК ====================
 
