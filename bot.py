@@ -10,7 +10,7 @@ print(f"✅ aiogram version: {aiogram.__version__}")
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BusinessConnection
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 load_dotenv()
@@ -112,7 +112,9 @@ async def start(message: types.Message):
         "удалит или изменит сообщение — я пришлю тебе его оригинальный текст.\n\n"
         "**Как меня настроить:**\n"
         "1️⃣ Нажми кнопку ниже «Подключить к Business API»\n"
-        "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n\n"
+        "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
+        "3️⃣ Отправь любое сообщение кому-нибудь в ЛС\n"
+        "4️⃣ Нажми «Проверить подключение»\n\n"
         "⬇️ Нажми на кнопки ниже для настройки",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
@@ -124,7 +126,8 @@ async def show_instructions(callback: types.CallbackQuery):
         "📖 **Инструкция по настройке**\n\n"
         "**Шаг 1:** Нажми «Подключить к Business API»\n"
         "**Шаг 2:** В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-        "**Шаг 3:** Нажми «Проверить подключение»\n\n"
+        "**Шаг 3:** Отправь любое сообщение кому-нибудь в ЛС\n"
+        "**Шаг 4:** Нажми «Проверить подключение»\n\n"
         "⚠️ Бот сохраняет сообщения ТОЛЬКО после подключения.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -159,42 +162,32 @@ async def check_connection(callback: types.CallbackQuery):
         )
     await callback.answer()
 
-# ==================== BUSINESS API (РАБОТАЕТ В 3.17.0) ====================
+# ==================== BUSINESS API ====================
 
-@dp.business_connection()
-async def on_business_connection(connection: BusinessConnection):
-    """Обработчик бизнес-подключения (срабатывает 1 раз при подключении)"""
-    user_id = connection.user_id
-    save_connection(user_id, connection.connection_id)
-    await bot.send_message(
-        chat_id=user_id,
-        text=(
-            "🔔 **Бизнес-подключение установлено!**\n\n"
-            f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            "Теперь я сохраняю все сообщения из твоих чатов. 🚀"
-        )
-    )
-
+# ГЛАВНЫЙ ОБРАБОТЧИК - через бизнес-сообщения получаем connection_id
 @dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
     """
-    Сохраняет новые бизнес-сообщения.
-    Также автоматически сохраняет connection_id, если его нет в БД.
+    ОСНОВНОЙ СПОСОБ ПРОВЕРКИ ПОДКЛЮЧЕНИЯ!
+    Если бот получил бизнес-сообщение - значит подключение точно есть.
+    Сохраняем connection_id в базу.
     """
     if not message.business_message:
         return
     
     user_id = message.from_user.id
     
-    # АВТОМАТИЧЕСКИ СОХРАНЯЕМ CONNECTION_ID, ЕСЛИ ЕГО НЕТ
-    if not get_connection_id(user_id):
-        if message.business_connection_id:
+    # Проверяем, есть ли business_connection_id в сообщении
+    if message.business_connection_id:
+        # Сохраняем connection_id в базу, если его там нет
+        if not get_connection_id(user_id):
             save_connection(user_id, message.business_connection_id)
             await bot.send_message(
                 chat_id=user_id,
                 text="🔔 **Бизнес-подключение подтверждено!**\n\nТеперь я сохраняю все сообщения из твоих чатов. 🚀"
             )
     
+    # Сохраняем само сообщение
     text = message.text or message.caption
     
     media_type = None
@@ -234,7 +227,6 @@ async def handle_business_message(message: types.Message):
 async def business_middleware(handler, event: types.Update, data: dict):
     """
     Обрабатывает изменения и удаления через middleware
-    (в aiogram 3.17.0 нет отдельных декораторов для этого)
     """
     
     # Измененные сообщения
@@ -242,9 +234,9 @@ async def business_middleware(handler, event: types.Update, data: dict):
         message = event.edited_business_message
         user_id = message.from_user.id
         
-        # Автоматически сохраняем connection_id, если его нет
+        # Сохраняем connection_id, если его нет
         if not get_connection_id(user_id):
-            if message.business_connection_id:
+            if hasattr(message, 'business_connection_id') and message.business_connection_id:
                 save_connection(user_id, message.business_connection_id)
         
         old_data = get_message(user_id, message.message_id, message.chat.id)
@@ -278,7 +270,7 @@ async def business_middleware(handler, event: types.Update, data: dict):
         user_id = ev.user_id
         chat_id = ev.chat.id
         
-        # Автоматически сохраняем connection_id, если его нет
+        # Сохраняем connection_id, если его нет
         if not get_connection_id(user_id):
             if hasattr(ev, 'business_connection_id') and ev.business_connection_id:
                 save_connection(user_id, ev.business_connection_id)
