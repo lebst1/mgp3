@@ -5,7 +5,6 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-# Проверка версии aiogram
 import aiogram
 print(f"✅ aiogram version: {aiogram.__version__}")
 
@@ -20,47 +19,31 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден в .env файле!")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-# ==================== БАЗА ДАННЫХ ====================
+logging.basicConfig(level=logging.INFO)
 
 def init_db():
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS saved_messages (
-            message_id INTEGER,
-            chat_id INTEGER,
-            user_id INTEGER,
-            text TEXT,
-            media_type TEXT,
-            media_id TEXT,
-            saved_at TIMESTAMP,
-            PRIMARY KEY (message_id, chat_id)
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS user_connections (
-            user_id INTEGER PRIMARY KEY,
-            connection_id TEXT,
-            connected_at TIMESTAMP
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS saved_messages (
+        message_id INTEGER, chat_id INTEGER, user_id INTEGER,
+        text TEXT, media_type TEXT, media_id TEXT, saved_at TIMESTAMP,
+        PRIMARY KEY (message_id, chat_id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS user_connections (
+        user_id INTEGER PRIMARY KEY, connection_id TEXT, connected_at TIMESTAMP
+    )''')
     conn.commit()
     conn.close()
 
-def save_connection(user_id: int, connection_id: str):
+def save_connection(user_id, connection_id):
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO user_connections (user_id, connection_id, connected_at) VALUES (?, ?, ?)",
+    c.execute("INSERT OR REPLACE INTO user_connections VALUES (?, ?, ?)",
               (user_id, connection_id, datetime.now()))
     conn.commit()
     conn.close()
 
-def get_connection_id(user_id: int):
+def get_connection_id(user_id):
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
     c.execute("SELECT connection_id FROM user_connections WHERE user_id=?", (user_id,))
@@ -68,17 +51,15 @@ def get_connection_id(user_id: int):
     conn.close()
     return result[0] if result else None
 
-def save_message(user_id: int, message_id: int, chat_id: int, text: str = None, media_type: str = None, media_id: str = None):
+def save_message(user_id, message_id, chat_id, text=None, media_type=None, media_id=None):
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
-    c.execute(
-        "INSERT OR REPLACE INTO saved_messages (user_id, message_id, chat_id, text, media_type, media_id, saved_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, message_id, chat_id, text, media_type, media_id, datetime.now())
-    )
+    c.execute("INSERT OR REPLACE INTO saved_messages VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (message_id, chat_id, user_id, text, media_type, media_id, datetime.now()))
     conn.commit()
     conn.close()
 
-def get_message(user_id: int, message_id: int, chat_id: int):
+def get_message(user_id, message_id, chat_id):
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
     c.execute("SELECT text, media_type, media_id FROM saved_messages WHERE user_id=? AND message_id=? AND chat_id=?", 
@@ -87,7 +68,7 @@ def get_message(user_id: int, message_id: int, chat_id: int):
     conn.close()
     return result
 
-def delete_message(user_id: int, message_id: int, chat_id: int):
+def delete_message(user_id, message_id, chat_id):
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
     c.execute("DELETE FROM saved_messages WHERE user_id=? AND message_id=? AND chat_id=?", 
@@ -95,105 +76,73 @@ def delete_message(user_id: int, message_id: int, chat_id: int):
     conn.commit()
     conn.close()
 
-# ==================== ИНИЦИАЛИЗАЦИЯ БОТА ====================
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ==================== КЛАВИАТУРЫ ====================
-
 def get_main_keyboard():
     keyboard = InlineKeyboardBuilder()
-    keyboard.row(InlineKeyboardButton(text="🤖 Скопировать юзера бота", switch_inline_query=""))
-    keyboard.row(InlineKeyboardButton(text="🔗 Подключить к Business API", url="https://t.me/BotFather?start=set_business"))
-    keyboard.row(InlineKeyboardButton(text="📖 Инструкция по настройке", callback_data="instructions"))
-    keyboard.row(InlineKeyboardButton(text="✅ Проверить подключение", callback_data="check_connection"))
+    keyboard.row(InlineKeyboardButton(text="🤖 Скопировать юзера", switch_inline_query=""))
+    keyboard.row(InlineKeyboardButton(text="🔗 Подключить Business API", url="https://t.me/BotFather?start=set_business"))
+    keyboard.row(InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions"))
+    keyboard.row(InlineKeyboardButton(text="✅ Проверить", callback_data="check_connection"))
     return keyboard.as_markup()
-
-# ==================== ОБРАБОТЧИКИ КОМАНД ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    welcome_text = (
-        "👋 **Привет! Я MGP3 бот для отслеживания удаленных сообщений!**\n\n"
-        "Я сохраняю все сообщения из твоих личных чатов, и если собеседник "
-        "удалит или изменит сообщение — я пришлю тебе его оригинальный текст.\n\n"
-        "**Как меня настроить:**\n"
-        "1️⃣ Нажми кнопку ниже «Подключить к Business API»\n"
-        "2️⃣ Выбери свой аккаунт и разреши доступ\n"
-        "3️⃣ Я автоматически начну сохранять сообщения\n\n"
-        "⬇️ Нажми на кнопки ниже для настройки"
-    )
-    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await message.answer("👋 Привет! Отслеживаю удаленные сообщения.", reply_markup=get_main_keyboard())
 
 @dp.callback_query(F.data == "instructions")
-async def show_instructions(callback: types.CallbackQuery):
-    instructions = (
-        "📖 **Подробная инструкция по настройке**\n\n"
-        "**Шаг 1:** Нажми «Подключить к Business API»\n"
-        "**Шаг 2:** В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-        "**Шаг 3:** Нажми «Проверить подключение»\n\n"
-        "⚠️ Бот сохраняет сообщения ТОЛЬКО после подключения."
-    )
-    await callback.message.edit_text(
-        instructions,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
-        ])
-    )
+async def instructions(callback: types.CallbackQuery):
+    await callback.message.edit_text("📖 Инструкция: подключи бота через Business API", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
     await callback.answer()
 
-@dp.callback_query(F.data == "back_to_start")
-async def back_to_start(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        "👋 **Главное меню**\n\nВыбери действие:",
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard()
-    )
+@dp.callback_query(F.data == "back")
+async def back(callback: types.CallbackQuery):
+    await callback.message.edit_text("👋 Главное меню", reply_markup=get_main_keyboard())
     await callback.answer()
 
 @dp.callback_query(F.data == "check_connection")
-async def check_connection(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    connection_id = get_connection_id(user_id)
-    if connection_id:
-        await callback.message.answer("✅ **Подключение активно!**")
+async def check(callback: types.CallbackQuery):
+    if get_connection_id(callback.from_user.id):
+        await callback.message.answer("✅ Подключено!")
     else:
-        await callback.message.answer("❌ **Подключение не найдено**")
+        await callback.message.answer("❌ Не подключено")
     await callback.answer()
 
-# ==================== ОБРАБОТЧИКИ BUSINESS API ====================
-
-# 1. Обработчик бизнес-подключений
+# ========== ВСЯ БИЗНЕС-ЛОГИКА В ОДНОМ MIDDLEWARE ==========
 @dp.update.outer_middleware
-async def business_connection_middleware(update: types.Update, handler):
-    """Обработчик бизнес-подключений через middleware"""
+async def business_handler(update: types.Update, handler):
+    # Подключение
     if update.business_connection:
-        user_id = update.business_connection.user_id
-        connection_id = update.business_connection.connection_id
-        save_connection(user_id, connection_id)
-        await bot.send_message(
-            chat_id=user_id,
-            text=(
-                "🔔 **Бизнес-подключение установлено!**\n\n"
-                f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-                "Теперь я сохраняю все сообщения из твоих чатов. 🚀"
-            )
-        )
+        save_connection(update.business_connection.user_id, update.business_connection.connection_id)
+        await bot.send_message(update.business_connection.user_id, "🔔 Бизнес-подключение установлено!")
         return
+    
+    # Изменение
+    if update.edited_business_message:
+        msg = update.edited_business_message
+        old = get_message(msg.from_user.id, msg.message_id, msg.chat.id)
+        if old:
+            await bot.send_message(msg.from_user.id, f"✏️ Изменено!\nБыло: {old[0]}\nСтало: {msg.text}")
+            save_message(msg.from_user.id, msg.message_id, msg.chat.id, msg.text)
+        return
+    
+    # Удаление
+    if update.business_messages_deleted:
+        for msg_id in update.business_messages_deleted.message_ids:
+            old = get_message(update.business_messages_deleted.user_id, msg_id, update.business_messages_deleted.chat.id)
+            if old:
+                await bot.send_message(update.business_messages_deleted.user_id, f"🗑️ Удалено!\nТекст: {old[0]}")
+                delete_message(update.business_messages_deleted.user_id, msg_id, update.business_messages_deleted.chat.id)
+        return
+    
     return await handler(update)
 
-# 2. Обработчик бизнес-сообщений (новые сообщения)
+# Новые сообщения
 @dp.message(F.business_message)
-async def handle_business_message(message: types.Message):
-    """Сохраняет все бизнес-сообщения"""
-    user_id = message.from_user.id
-    text = message.text or message.caption
-    
+async def new_business_message(message: types.Message):
     media_type = None
     media_id = None
-    
     if message.photo:
         media_type = "photo"
         media_id = message.photo[-1].file_id
@@ -203,108 +152,12 @@ async def handle_business_message(message: types.Message):
     elif message.document:
         media_type = "document"
         media_id = message.document.file_id
-    elif message.voice:
-        media_type = "voice"
-        media_id = message.voice.file_id
-    elif message.audio:
-        media_type = "audio"
-        media_id = message.audio.file_id
-    
-    save_message(
-        user_id=user_id,
-        message_id=message.message_id,
-        chat_id=message.chat.id,
-        text=text,
-        media_type=media_type,
-        media_id=media_id
-    )
-
-# 3. Обработчик измененных сообщений (через middleware)
-@dp.update.outer_middleware
-async def edited_business_message_middleware(update: types.Update, handler):
-    """Обработчик измененных бизнес-сообщений через middleware"""
-    if update.edited_business_message:
-        message = update.edited_business_message
-        user_id = message.from_user.id
-        old_data = get_message(user_id, message.message_id, message.chat.id)
-        
-        if old_data:
-            old_text, old_media_type, old_media_id = old_data
-            
-            notification = (
-                "✏️ **Сообщение было изменено!**\n\n"
-                f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
-                f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}\n\n"
-                f"Чат: {message.chat.id}\n"
-                f"ID сообщения: {message.message_id}"
-            )
-            
-            await bot.send_message(user_id, notification)
-            
-            save_message(
-                user_id=user_id,
-                message_id=message.message_id,
-                chat_id=message.chat.id,
-                text=message.text or message.caption,
-                media_type=old_media_type,
-                media_id=old_media_id
-            )
-        return
-    return await handler(update)
-
-# 4. Обработчик удаленных сообщений (через middleware)
-@dp.update.outer_middleware
-async def deleted_business_messages_middleware(update: types.Update, handler):
-    """Обработчик удаленных бизнес-сообщений через middleware"""
-    if update.business_messages_deleted:
-        event = update.business_messages_deleted
-        user_id = event.user_id
-        chat_id = event.chat.id
-        deleted_ids = event.message_ids
-        
-        for msg_id in deleted_ids:
-            old_data = get_message(user_id, msg_id, chat_id)
-            
-            if old_data:
-                text, media_type, media_id = old_data
-                
-                notification = (
-                    "🗑️ **Сообщение было удалено!**\n\n"
-                    f"**Текст:**\n{text or 'Медиафайл'}\n\n"
-                    f"**Тип медиа:** {media_type or 'Нет'}\n"
-                    f"Чат: {chat_id}\n"
-                    f"ID сообщения: {msg_id}"
-                )
-                
-                if media_id:
-                    try:
-                        if media_type == "photo":
-                            await bot.send_photo(user_id, media_id, caption=text)
-                        elif media_type == "video":
-                            await bot.send_video(user_id, media_id, caption=text)
-                        elif media_type == "document":
-                            await bot.send_document(user_id, media_id, caption=text)
-                        elif media_type == "voice":
-                            await bot.send_voice(user_id, media_id, caption=text)
-                        elif media_type == "audio":
-                            await bot.send_audio(user_id, media_id, caption=text)
-                        else:
-                            await bot.send_message(user_id, notification)
-                    except Exception as e:
-                        logging.error(f"Ошибка отправки медиа: {e}")
-                        await bot.send_message(user_id, notification)
-                else:
-                    await bot.send_message(user_id, notification)
-                
-                delete_message(user_id, msg_id, chat_id)
-        return
-    return await handler(update)
-
-# ==================== ЗАПУСК ====================
+    save_message(message.from_user.id, message.message_id, message.chat.id, 
+                message.text or message.caption, media_type, media_id)
 
 async def main():
     init_db()
-    logging.info("🚀 MGP3 бот запущен на BotHost!")
+    logging.info("🚀 Бот запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
