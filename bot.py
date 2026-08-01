@@ -210,115 +210,120 @@ async def on_business_connection(connection: BusinessConnection):
         text=(
             "🔔 **Бизнес-подключение установлено!**\n\n"
             f"Connection ID: `{connection_id}`\n"
-            "Теперь я сохраняю все сообщения из твоих чатов. 🚀\n\n"
-            "✅ Нажми «Проверить подключение» — должно показать активно!"
+            "Теперь я сохраняю все сообщения из твоих чатов. 🚀"
         ),
         parse_mode="Markdown"
     )
-    
-    logging.info(f"✅ Business connection установлен для user_id={user_id}")
 
-@dp.message(F.business_message)
-async def handle_business_message(message: types.Message):
-    if not message.business_message:
+# ==================== MIDDLEWARE ДЛЯ ВСЕХ БИЗНЕС-СОБЫТИЙ ====================
+
+@dp.update.outer_middleware
+async def business_middleware(handler, event: types.Update, data: dict):
+    """
+    ЕДИНЫЙ ОБРАБОТЧИК ВСЕХ БИЗНЕС-СОБЫТИЙ
+    В aiogram 3.18.0 нет отдельных декораторов для бизнес-событий
+    """
+    
+    # 1. ОБЫЧНЫЕ БИЗНЕС-СООБЩЕНИЯ (новые сообщения)
+    if hasattr(event, 'business_message') and event.business_message:
+        message = event.business_message
+        user_id = message.from_user.id
+        
+        # Сохраняем connection_id если есть
+        if hasattr(message, 'business_connection_id') and message.business_connection_id:
+            if not get_connection_id(user_id):
+                save_connection(user_id, message.business_connection_id)
+        
+        # Сохраняем сообщение
+        text = message.text or message.caption
+        media_type = None
+        media_id = None
+        
+        if message.photo:
+            media_type = "photo"
+            media_id = message.photo[-1].file_id
+        elif message.video:
+            media_type = "video"
+            media_id = message.video.file_id
+        elif message.document:
+            media_type = "document"
+            media_id = message.document.file_id
+        elif message.voice:
+            media_type = "voice"
+            media_id = message.voice.file_id
+        elif message.audio:
+            media_type = "audio"
+            media_id = message.audio.file_id
+        elif message.sticker:
+            media_type = "sticker"
+            media_id = message.sticker.file_id
+        
+        save_message(user_id, message.message_id, message.chat.id, text, media_type, media_id)
         return
     
-    user_id = message.from_user.id
-    
-    if hasattr(message, 'business_connection_id') and message.business_connection_id:
-        if not get_connection_id(user_id):
-            save_connection(user_id, message.business_connection_id)
-    
-    text = message.text or message.caption
-    
-    media_type = None
-    media_id = None
-    
-    if message.photo:
-        media_type = "photo"
-        media_id = message.photo[-1].file_id
-    elif message.video:
-        media_type = "video"
-        media_id = message.video.file_id
-    elif message.document:
-        media_type = "document"
-        media_id = message.document.file_id
-    elif message.voice:
-        media_type = "voice"
-        media_id = message.voice.file_id
-    elif message.audio:
-        media_type = "audio"
-        media_id = message.audio.file_id
-    elif message.sticker:
-        media_type = "sticker"
-        media_id = message.sticker.file_id
-    
-    save_message(
-        user_id=user_id,
-        message_id=message.message_id,
-        chat_id=message.chat.id,
-        text=text,
-        media_type=media_type,
-        media_id=media_id
-    )
-
-@dp.edited_business_message()
-async def handle_edited_business_message(message: types.Message):
-    user_id = message.from_user.id
-    
-    if hasattr(message, 'business_connection_id') and message.business_connection_id:
-        if not get_connection_id(user_id):
-            save_connection(user_id, message.business_connection_id)
-    
-    old_data = get_message(user_id, message.message_id, message.chat.id)
-    
-    if old_data:
-        old_text, old_media_type, old_media_id = old_data
+    # 2. ИЗМЕНЕННЫЕ СООБЩЕНИЯ
+    if hasattr(event, 'edited_business_message') and event.edited_business_message:
+        message = event.edited_business_message
+        user_id = message.from_user.id
         
-        notification = (
-            "✏️ **Сообщение было изменено!**\n\n"
-            f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
-            f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}"
-        )
+        if hasattr(message, 'business_connection_id') and message.business_connection_id:
+            if not get_connection_id(user_id):
+                save_connection(user_id, message.business_connection_id)
         
-        await bot.send_message(user_id, notification)
-        
-        save_message(
-            user_id=user_id,
-            message_id=message.message_id,
-            chat_id=message.chat.id,
-            text=message.text or message.caption,
-            media_type=old_media_type,
-            media_id=old_media_id
-        )
-
-@dp.business_messages_deleted()
-async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
-    user_id = event.user_id
-    
-    if hasattr(event, 'business_connection_id') and event.business_connection_id:
-        if not get_connection_id(user_id):
-            save_connection(user_id, event.business_connection_id)
-    
-    for msg_id in event.message_ids:
-        old_data = get_message(user_id, msg_id, event.chat.id)
+        old_data = get_message(user_id, message.message_id, message.chat.id)
         
         if old_data:
-            text, media_type, media_id = old_data
+            old_text, old_media_type, old_media_id = old_data
             
             notification = (
-                "🗑️ **Сообщение было удалено!**\n\n"
-                f"**Текст:**\n{text or 'Медиафайл'}"
+                "✏️ **Сообщение было изменено!**\n\n"
+                f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
+                f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}"
             )
             
             await bot.send_message(user_id, notification)
-            delete_message(user_id, msg_id, event.chat.id)
+            
+            save_message(
+                user_id=user_id,
+                message_id=message.message_id,
+                chat_id=message.chat.id,
+                text=message.text or message.caption,
+                media_type=old_media_type,
+                media_id=old_media_id
+            )
+        return
+    
+    # 3. УДАЛЕННЫЕ СООБЩЕНИЯ
+    if hasattr(event, 'business_messages_deleted') and event.business_messages_deleted:
+        ev = event.business_messages_deleted
+        user_id = ev.user_id
+        
+        if hasattr(ev, 'business_connection_id') and ev.business_connection_id:
+            if not get_connection_id(user_id):
+                save_connection(user_id, ev.business_connection_id)
+        
+        for msg_id in ev.message_ids:
+            old_data = get_message(user_id, msg_id, ev.chat.id)
+            
+            if old_data:
+                text, media_type, media_id = old_data
+                
+                notification = (
+                    "🗑️ **Сообщение было удалено!**\n\n"
+                    f"**Текст:**\n{text or 'Медиафайл'}"
+                )
+                
+                await bot.send_message(user_id, notification)
+                delete_message(user_id, msg_id, ev.chat.id)
+        return
+    
+    return await handler(event, data)
 
 # ==================== ЗАПУСК ====================
 
 async def main():
     init_db()
-    logging.info("🚀 MGP3 бот запущен!")
+    logging.info("🚀 MGP3 бот запущен на aiogram 3.18.0!")
     logging.info("💡 Подключи бота в Профиль → Автоматизация чатов")
     await dp.start_polling(bot)
 
