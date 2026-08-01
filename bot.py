@@ -9,8 +9,6 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# BusinessConnection импортируем отдельно, если нужно
-from aiogram.types import BusinessConnection
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -155,8 +153,9 @@ async def check_connection(callback: types.CallbackQuery):
         await callback.message.answer("❌ **Подключение не найдено**")
     await callback.answer()
 
+# Используем types.BusinessConnection вместо прямого импорта
 @dp.business_connection()
-async def on_business_connection(connection: BusinessConnection):
+async def on_business_connection(connection: types.BusinessConnection):
     user_id = connection.user_id
     save_connection(user_id, connection.connection_id)
     await bot.send_message(chat_id=user_id, text="🔔 **Бизнес-подключение установлено!**")
@@ -176,6 +175,12 @@ async def handle_business_message(message: types.Message):
     elif message.document:
         media_type = "document"
         media_id = message.document.file_id
+    elif message.voice:
+        media_type = "voice"
+        media_id = message.voice.file_id
+    elif message.audio:
+        media_type = "audio"
+        media_id = message.audio.file_id
     save_message(user_id, message.message_id, message.chat.id, text, media_type, media_id)
 
 @dp.edited_business_message()
@@ -203,7 +208,18 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
             notification = f"🗑️ **Сообщение удалено!**\n\nТекст: {text or 'Медиа'}"
             if media_id:
                 try:
-                    await bot.send_photo(user_id, media_id, caption=text)
+                    if media_type == "photo":
+                        await bot.send_photo(user_id, media_id, caption=text)
+                    elif media_type == "video":
+                        await bot.send_video(user_id, media_id, caption=text)
+                    elif media_type == "document":
+                        await bot.send_document(user_id, media_id, caption=text)
+                    elif media_type == "voice":
+                        await bot.send_voice(user_id, media_id, caption=text)
+                    elif media_type == "audio":
+                        await bot.send_audio(user_id, media_id, caption=text)
+                    else:
+                        await bot.send_message(user_id, notification)
                 except:
                     await bot.send_message(user_id, notification)
             else:
