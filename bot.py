@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
+from aiogram.types import BusinessConnection
 
 load_dotenv()
 
@@ -45,58 +46,19 @@ def save_message(user_id, chat_id, message_id, text):
     conn.close()
     logging.info(f"✅ Сохранено сообщение {message_id} от user {user_id}")
 
-def get_all_messages(user_id):
-    conn = sqlite3.connect('messages.db')
-    c = conn.cursor()
-    c.execute("SELECT message_id, text, created_at FROM messages WHERE user_id=? ORDER BY created_at DESC LIMIT 10", (user_id,))
-    result = c.fetchall()
-    conn.close()
-    return result
-
 # ==================== БОТ ====================
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-# ---------- КОМАНДЫ ----------
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
         "👋 **Привет! Я MGP3 бот!**\n\n"
         "Я сохраняю все сообщения из твоих чатов.\n\n"
-        "📌 **Команды:**\n"
-        "/start - показать это сообщение\n"
-        "/stats - показать статистику\n"
-        "/last - показать последние 10 сохраненных сообщений\n\n"
         "Просто отправь мне любое сообщение — я его сохраню!",
         parse_mode="Markdown"
     )
-
-@dp.message(Command("stats"))
-async def stats(message: types.Message):
-    conn = sqlite3.connect('messages.db')
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM messages WHERE user_id=?", (message.from_user.id,))
-    count = c.fetchone()[0]
-    conn.close()
-    await message.answer(f"📊 **Статистика:**\n\nСохранено сообщений: {count}", parse_mode="Markdown")
-
-@dp.message(Command("last"))
-async def last_messages(message: types.Message):
-    messages = get_all_messages(message.from_user.id)
-    if not messages:
-        await message.answer("❌ У тебя пока нет сохраненных сообщений.")
-        return
-    
-    text = "📋 **Последние 10 сообщений:**\n\n"
-    for msg_id, msg_text, created_at in messages:
-        created = created_at[:16] if created_at else "неизвестно"
-        text += f"🆔 `{msg_id}` | {created}\n📝 {msg_text[:50]}...\n\n"
-    
-    await message.answer(text, parse_mode="Markdown")
-
-# ---------- СОХРАНЕНИЕ ВСЕХ СООБЩЕНИЙ ----------
 
 @dp.message(F.chat.type == "private")
 async def save_all_messages(message: types.Message):
@@ -124,12 +86,33 @@ async def save_all_messages(message: types.Message):
     save_message(user_id, chat_id, message_id, text)
     await message.reply(f"✅ Сохранено! ID: `{message_id}`", parse_mode="Markdown")
 
+# ==================== BUSINESS API (ШАГ 1) ====================
+
+@dp.business_connection()
+async def on_business_connection(connection: BusinessConnection):
+    user_id = connection.user_id
+    connection_id = connection.connection_id
+    
+    logging.info(f"🔔 BUSINESS CONNECTION! user_id={user_id}, connection_id={connection_id}")
+    
+    await bot.send_message(
+        chat_id=user_id,
+        text=(
+            "🔔 **Бизнес-подключение установлено!**\n\n"
+            f"Connection ID: `{connection_id}`\n"
+            "Теперь я буду видеть сообщения из твоих чатов.\n\n"
+            "Для проверки — отправь кому-нибудь сообщение, и я его сохраню."
+        ),
+        parse_mode="Markdown"
+    )
+
 # ==================== ЗАПУСК ====================
 
 async def main():
     init_db()
-    logging.info("🚀 MGP3 БОТ ЗАПУЩЕН НА BOTHOST!")
-    logging.info("📌 Команды: /start, /stats, /last")
+    logging.info("🚀 MGP3 БОТ ЗАПУЩЕН!")
+    logging.info("📌 /start - приветствие")
+    logging.info("📌 Подключи бота через Профиль → Автоматизация чатов")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
