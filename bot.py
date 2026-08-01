@@ -10,7 +10,7 @@ print(f"✅ aiogram version: {aiogram.__version__}")
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BusinessConnection
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 load_dotenv()
@@ -102,6 +102,7 @@ def get_main_keyboard():
     keyboard.row(InlineKeyboardButton(text="🔗 Подключить к Business API", url="https://t.me/BotFather?start=set_business"))
     keyboard.row(InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions"))
     keyboard.row(InlineKeyboardButton(text="✅ Проверить подключение", callback_data="check_connection"))
+    keyboard.row(InlineKeyboardButton(text="🔄 Переподключить", callback_data="reconnect"))
     return keyboard.as_markup()
 
 @dp.message(Command("start"))
@@ -113,8 +114,9 @@ async def start(message: types.Message):
         "**Как меня настроить:**\n"
         "1️⃣ Нажми кнопку ниже «Подключить к Business API»\n"
         "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-        "3️⃣ Отправь любое сообщение кому-нибудь в ЛС\n"
-        "4️⃣ Нажми «Проверить подключение»\n\n"
+        "3️⃣ Нажми «Проверить подключение»\n\n"
+        "⚠️ Если подключение не определяется — нажми «Переподключить»\n"
+        "и следуй инструкции.\n\n"
         "⬇️ Нажми на кнопки ниже для настройки",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
@@ -126,8 +128,12 @@ async def show_instructions(callback: types.CallbackQuery):
         "📖 **Инструкция по настройке**\n\n"
         "**Шаг 1:** Нажми «Подключить к Business API»\n"
         "**Шаг 2:** В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-        "**Шаг 3:** Отправь любое сообщение кому-нибудь в ЛС\n"
-        "**Шаг 4:** Нажми «Проверить подключение»\n\n"
+        "**Шаг 3:** Нажми «Проверить подключение»\n\n"
+        "**Если не работает:**\n"
+        "1️⃣ Нажми «Переподключить»\n"
+        "2️⃣ Удали бота из Telegram Business → Chatbots\n"
+        "3️⃣ Снова добавь его туда\n"
+        "4️⃣ Нажми «Проверить подключение»\n\n"
         "⚠️ Бот сохраняет сообщения ТОЛЬКО после подключения.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -154,32 +160,63 @@ async def check_connection(callback: types.CallbackQuery):
     else:
         await callback.message.answer(
             "❌ **Подключение не найдено**\n\n"
-            "Чтобы подключить бота:\n"
-            "1️⃣ Нажми «Подключить к Business API»\n"
-            "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
-            "3️⃣ После добавления отправь любое сообщение в личку с кем-нибудь\n"
+            "Попробуй переподключить бота:\n"
+            "1️⃣ Нажми кнопку «Переподключить»\n"
+            "2️⃣ Удали бота из Telegram Business → Chatbots\n"
+            "3️⃣ Снова добавь его туда\n"
             "4️⃣ Затем нажми «Проверить подключение» снова"
         )
     await callback.answer()
 
+@dp.callback_query(F.data == "reconnect")
+async def reconnect_bot(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    
+    # Удаляем старую запись о подключении
+    conn = sqlite3.connect('messages.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM user_connections WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    
+    await callback.message.answer(
+        "🔄 **Старое подключение сброшено!**\n\n"
+        "Теперь сделай:\n"
+        "1️⃣ Удали бота из Telegram Business → Chatbots\n"
+        "2️⃣ Снова добавь его туда\n"
+        "3️⃣ Нажми «Проверить подключение»\n\n"
+        "⚠️ Бот должен быть запущен во время подключения!"
+    )
+    await callback.answer()
+
 # ==================== BUSINESS API ====================
 
-# ГЛАВНЫЙ ОБРАБОТЧИК - через бизнес-сообщения получаем connection_id
+@dp.business_connection()
+async def on_business_connection(connection: BusinessConnection):
+    """Обработчик бизнес-подключения - срабатывает при подключении"""
+    user_id = connection.user_id
+    save_connection(user_id, connection.connection_id)
+    
+    await bot.send_message(
+        chat_id=user_id,
+        text=(
+            "🔔 **Бизнес-подключение установлено!**\n\n"
+            f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+            "Теперь я сохраняю все сообщения из твоих чатов. 🚀\n\n"
+            "✅ Нажми «Проверить подключение» - должно показать активно!"
+        )
+    )
+
 @dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
-    """
-    ОСНОВНОЙ СПОСОБ ПРОВЕРКИ ПОДКЛЮЧЕНИЯ!
-    Если бот получил бизнес-сообщение - значит подключение точно есть.
-    Сохраняем connection_id в базу.
-    """
+    """Сохраняет новые бизнес-сообщения"""
     if not message.business_message:
         return
     
     user_id = message.from_user.id
     
-    # Проверяем, есть ли business_connection_id в сообщении
-    if message.business_connection_id:
-        # Сохраняем connection_id в базу, если его там нет
+    # Если connection_id есть в сообщении - сохраняем
+    if hasattr(message, 'business_connection_id') and message.business_connection_id:
         if not get_connection_id(user_id):
             save_connection(user_id, message.business_connection_id)
             await bot.send_message(
@@ -187,7 +224,6 @@ async def handle_business_message(message: types.Message):
                 text="🔔 **Бизнес-подключение подтверждено!**\n\nТеперь я сохраняю все сообщения из твоих чатов. 🚀"
             )
     
-    # Сохраняем само сообщение
     text = message.text or message.caption
     
     media_type = None
@@ -234,7 +270,6 @@ async def business_middleware(handler, event: types.Update, data: dict):
         message = event.edited_business_message
         user_id = message.from_user.id
         
-        # Сохраняем connection_id, если его нет
         if not get_connection_id(user_id):
             if hasattr(message, 'business_connection_id') and message.business_connection_id:
                 save_connection(user_id, message.business_connection_id)
@@ -270,7 +305,6 @@ async def business_middleware(handler, event: types.Update, data: dict):
         user_id = ev.user_id
         chat_id = ev.chat.id
         
-        # Сохраняем connection_id, если его нет
         if not get_connection_id(user_id):
             if hasattr(ev, 'business_connection_id') and ev.business_connection_id:
                 save_connection(user_id, ev.business_connection_id)
@@ -319,6 +353,7 @@ async def business_middleware(handler, event: types.Update, data: dict):
 async def main():
     init_db()
     logging.info("🚀 MGP3 бот запущен!")
+    logging.info("⚠️ Если подключение не определяется - нажми кнопку 'Переподключить'")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
