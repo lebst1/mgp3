@@ -153,7 +153,7 @@ async def check_connection(callback: types.CallbackQuery):
         await callback.message.answer("❌ **Подключение не найдено**")
     await callback.answer()
 
-# Используем types.BusinessConnection вместо прямого импорта
+# ИСПРАВЛЕНО: используем types.BusinessConnection вместо прямого импорта
 @dp.business_connection()
 async def on_business_connection(connection: types.BusinessConnection):
     user_id = connection.user_id
