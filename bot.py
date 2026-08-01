@@ -149,14 +149,21 @@ async def check_connection(callback: types.CallbackQuery):
     if connection_id:
         await callback.message.answer("✅ **Подключение активно!**\n\nЯ уже сохраняю все сообщения из твоих чатов.")
     else:
-        await callback.message.answer("❌ **Подключение не найдено**\n\nЧтобы подключить бота:\n1️⃣ Нажми «Подключить к Business API»\n2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота")
+        await callback.message.answer(
+            "❌ **Подключение не найдено**\n\n"
+            "Чтобы подключить бота:\n"
+            "1️⃣ Нажми «Подключить к Business API»\n"
+            "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота\n"
+            "3️⃣ После добавления отправь любое сообщение в личку с кем-нибудь\n"
+            "4️⃣ Затем нажми «Проверить подключение» снова"
+        )
     await callback.answer()
 
 # ==================== BUSINESS API ====================
 
 @dp.business_connection()
 async def on_business_connection(connection: BusinessConnection):
-    """Обработчик бизнес-подключения"""
+    """Обработчик бизнес-подключения (срабатывает 1 раз при подключении)"""
     user_id = connection.user_id
     save_connection(user_id, connection.connection_id)
     await bot.send_message(
@@ -170,11 +177,24 @@ async def on_business_connection(connection: BusinessConnection):
 
 @dp.business_message()
 async def handle_business_message(message: types.Message):
-    """Сохраняет новые бизнес-сообщения"""
+    """
+    Сохраняет новые бизнес-сообщения.
+    Также автоматически сохраняет connection_id, если его нет в БД.
+    """
     if not message.business_message:
         return
     
     user_id = message.from_user.id
+    
+    # АВТОМАТИЧЕСКИ СОХРАНЯЕМ CONNECTION_ID, ЕСЛИ ЕГО НЕТ
+    if not get_connection_id(user_id):
+        if message.business_connection_id:
+            save_connection(user_id, message.business_connection_id)
+            await bot.send_message(
+                chat_id=user_id,
+                text="🔔 **Бизнес-подключение подтверждено!**\n\nТеперь я сохраняю все сообщения из твоих чатов. 🚀"
+            )
+    
     text = message.text or message.caption
     
     media_type = None
@@ -212,6 +232,12 @@ async def handle_business_message(message: types.Message):
 async def handle_edited_business_message(message: types.Message):
     """Обрабатывает изменения сообщений"""
     user_id = message.from_user.id
+    
+    # Автоматически сохраняем connection_id, если его нет
+    if not get_connection_id(user_id):
+        if message.business_connection_id:
+            save_connection(user_id, message.business_connection_id)
+    
     old_data = get_message(user_id, message.message_id, message.chat.id)
     
     if old_data:
@@ -241,6 +267,11 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
     """Обрабатывает удаление сообщений"""
     user_id = event.user_id
     chat_id = event.chat.id
+    
+    # Автоматически сохраняем connection_id, если его нет
+    if not get_connection_id(user_id):
+        if hasattr(event, 'business_connection_id') and event.business_connection_id:
+            save_connection(user_id, event.business_connection_id)
     
     for msg_id in event.message_ids:
         old_data = get_message(user_id, msg_id, chat_id)
