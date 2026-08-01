@@ -26,6 +26,15 @@ logging.basicConfig(level=logging.INFO)
 def init_db():
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_connections (
+            user_id INTEGER PRIMARY KEY,
+            connection_id TEXT,
+            connected_at TIMESTAMP
+        )
+    ''')
+    
     c.execute('''
         CREATE TABLE IF NOT EXISTS saved_messages (
             message_id INTEGER,
@@ -38,23 +47,20 @@ def init_db():
             PRIMARY KEY (message_id, chat_id)
         )
     ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS user_connections (
-            user_id INTEGER PRIMARY KEY,
-            connection_id TEXT,
-            connected_at TIMESTAMP
-        )
-    ''')
+    
     conn.commit()
     conn.close()
 
 def save_connection(user_id: int, connection_id: str):
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO user_connections (user_id, connection_id, connected_at) VALUES (?, ?, ?)",
-              (user_id, connection_id, datetime.now()))
+    c.execute(
+        "INSERT OR REPLACE INTO user_connections (user_id, connection_id, connected_at) VALUES (?, ?, ?)",
+        (user_id, connection_id, datetime.now())
+    )
     conn.commit()
     conn.close()
+    logging.info(f"✅ Сохранен connection_id для user_id={user_id}")
 
 def get_connection_id(user_id: int):
     conn = sqlite3.connect('messages.db')
@@ -63,6 +69,14 @@ def get_connection_id(user_id: int):
     result = c.fetchone()
     conn.close()
     return result[0] if result else None
+
+def delete_connection(user_id: int):
+    conn = sqlite3.connect('messages.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM user_connections WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    logging.info(f"🗑️ Удален connection_id для user_id={user_id}")
 
 def save_message(user_id: int, message_id: int, chat_id: int, text: str = None, media_type: str = None, media_id: str = None):
     conn = sqlite3.connect('messages.db')
@@ -129,9 +143,11 @@ async def show_instructions(callback: types.CallbackQuery):
         "**Шаг 4:** Нажми «Проверить подключение»\n\n"
         "⚠️ Если не работает — нажми «Сбросить подключение» и повтори шаги",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
-        ])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
+            ]
+        )
     )
     await callback.answer()
 
@@ -144,12 +160,31 @@ async def back_to_start(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+@dp.callback_query(F.data == "reset_connection")
+async def reset_connection(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    delete_connection(user_id)
+    await callback.message.answer(
+        "🔄 **Подключение сброшено!**\n\n"
+        "Теперь:\n"
+        "1️⃣ Удали бота из Профиль → Автоматизация чатов\n"
+        "2️⃣ Снова добавь его\n"
+        "3️⃣ Нажми «Проверить подключение»"
+    )
+    await callback.answer()
+
 @dp.callback_query(F.data == "check_connection")
 async def check_connection(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     connection_id = get_connection_id(user_id)
+    
     if connection_id:
-        await callback.message.answer("✅ **Подключение активно!**\n\nЯ сохраняю все сообщения из твоих чатов.")
+        await callback.message.answer(
+            f"✅ **Подключение активно!**\n\n"
+            f"Connection ID: `{connection_id}`\n"
+            f"Я сохраняю все сообщения из твоих чатов.",
+            parse_mode="Markdown"
+        )
     else:
         await callback.message.answer(
             "❌ **Подключение не найдено**\n\n"
@@ -161,33 +196,27 @@ async def check_connection(callback: types.CallbackQuery):
         )
     await callback.answer()
 
-@dp.callback_query(F.data == "reset_connection")
-async def reset_connection(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    conn = sqlite3.connect('messages.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM user_connections WHERE user_id=?", (user_id,))
-    conn.commit()
-    conn.close()
-    await callback.message.answer(
-        "🔄 **Подключение сброшено!**\n\n"
-        "Теперь:\n"
-        "1️⃣ Удали бота из Профиль → Автоматизация чатов\n"
-        "2️⃣ Снова добавь его\n"
-        "3️⃣ Нажми «Проверить подключение»"
-    )
-    await callback.answer()
-
 # ==================== BUSINESS API ====================
 
 @dp.business_connection()
 async def on_business_connection(connection: BusinessConnection):
     user_id = connection.user_id
-    save_connection(user_id, connection.connection_id)
+    connection_id = connection.connection_id
+    
+    save_connection(user_id, connection_id)
+    
     await bot.send_message(
         chat_id=user_id,
-        text="🔔 **Бизнес-подключение установлено!**\n\nТеперь я сохраняю все сообщения из твоих чатов. 🚀"
+        text=(
+            "🔔 **Бизнес-подключение установлено!**\n\n"
+            f"Connection ID: `{connection_id}`\n"
+            "Теперь я сохраняю все сообщения из твоих чатов. 🚀\n\n"
+            "✅ Нажми «Проверить подключение» — должно показать активно!"
+        ),
+        parse_mode="Markdown"
     )
+    
+    logging.info(f"✅ Business connection установлен для user_id={user_id}")
 
 @dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
@@ -196,7 +225,6 @@ async def handle_business_message(message: types.Message):
     
     user_id = message.from_user.id
     
-    # В aiogram 3.18+ бизнес-сообщения содержат business_connection_id
     if hasattr(message, 'business_connection_id') and message.business_connection_id:
         if not get_connection_id(user_id):
             save_connection(user_id, message.business_connection_id)
@@ -234,11 +262,8 @@ async def handle_business_message(message: types.Message):
         media_id=media_id
     )
 
-# ==================== ОБРАБОТЧИКИ ИЗМЕНЕНИЙ И УДАЛЕНИЙ ====================
-
 @dp.edited_business_message()
 async def handle_edited_business_message(message: types.Message):
-    """Обрабатывает изменения сообщений (доступно в aiogram 3.18+)"""
     user_id = message.from_user.id
     
     if hasattr(message, 'business_connection_id') and message.business_connection_id:
@@ -269,16 +294,14 @@ async def handle_edited_business_message(message: types.Message):
 
 @dp.business_messages_deleted()
 async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
-    """Обрабатывает удаление сообщений (доступно в aiogram 3.18+)"""
     user_id = event.user_id
-    chat_id = event.chat.id
     
     if hasattr(event, 'business_connection_id') and event.business_connection_id:
         if not get_connection_id(user_id):
             save_connection(user_id, event.business_connection_id)
     
     for msg_id in event.message_ids:
-        old_data = get_message(user_id, msg_id, chat_id)
+        old_data = get_message(user_id, msg_id, event.chat.id)
         
         if old_data:
             text, media_type, media_id = old_data
@@ -289,13 +312,14 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
             )
             
             await bot.send_message(user_id, notification)
-            delete_message(user_id, msg_id, chat_id)
+            delete_message(user_id, msg_id, event.chat.id)
 
 # ==================== ЗАПУСК ====================
 
 async def main():
     init_db()
-    logging.info("🚀 MGP3 бот запущен на aiogram 3.18+!")
+    logging.info("🚀 MGP3 бот запущен!")
+    logging.info("💡 Подключи бота в Профиль → Автоматизация чатов")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
