@@ -2,25 +2,14 @@ import asyncio
 import logging
 import sqlite3
 import os
-import sys
 from datetime import datetime
 from dotenv import load_dotenv
 
 # Проверка версии aiogram
-try:
-    import aiogram
-    print(f"✅ aiogram version: {aiogram.__version__}")
-    if aiogram.__version__.startswith('2.'):
-        print("❌ Ошибка: установлена версия 2.x, нужна 3.x!")
-        print("Установи: pip install aiogram==3.4.1")
-        sys.exit(1)
-except ImportError:
-    print("❌ aiogram не установлен!")
-    sys.exit(1)
+import aiogram
+print(f"✅ aiogram version: {aiogram.__version__}")
 
-from aiogram import Bot, types, F
-from aiogram.dispatcher import Dispatcher
-from aiogram.dispatcher.router import Router
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -36,7 +25,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# --- БАЗА ДАННЫХ ---
+# ==================== БАЗА ДАННЫХ ====================
+
 def init_db():
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
@@ -105,11 +95,13 @@ def delete_message(user_id: int, message_id: int, chat_id: int):
     conn.commit()
     conn.close()
 
-# --- ИНИЦИАЛИЗАЦИЯ БОТА ---
+# ==================== ИНИЦИАЛИЗАЦИЯ БОТА ====================
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- КЛАВИАТУРЫ ---
+# ==================== КЛАВИАТУРЫ ====================
+
 def get_main_keyboard():
     keyboard = InlineKeyboardBuilder()
     keyboard.row(InlineKeyboardButton(text="🤖 Скопировать юзера бота", switch_inline_query=""))
@@ -118,7 +110,8 @@ def get_main_keyboard():
     keyboard.row(InlineKeyboardButton(text="✅ Проверить подключение", callback_data="check_connection"))
     return keyboard.as_markup()
 
-# --- ОБРАБОТЧИКИ КОМАНД ---
+# ==================== ОБРАБОТЧИКИ КОМАНД ====================
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     welcome_text = (
@@ -171,27 +164,46 @@ async def check_connection(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     connection_id = get_connection_id(user_id)
     if connection_id:
-        await callback.message.answer("✅ **Подключение активно!**\n\nЯ уже сохраняю все сообщения из твоих чатов.")
+        await callback.message.answer(
+            "✅ **Подключение активно!**\n\n"
+            "Я уже сохраняю все сообщения из твоих чатов."
+        )
     else:
-        await callback.message.answer("❌ **Подключение не найдено**\n\nЧтобы подключить бота:\n1️⃣ Нажми «Подключить к Business API»\n2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота")
+        await callback.message.answer(
+            "❌ **Подключение не найдено**\n\n"
+            "Чтобы подключить бота:\n"
+            "1️⃣ Нажми «Подключить к Business API»\n"
+            "2️⃣ В Telegram: Настройки → Telegram Business → Chatbots → добавь бота"
+        )
     await callback.answer()
 
-# --- ОБРАБОТЧИКИ BUSINESS API ---
-@dp.business_connection()
-async def on_business_connection(connection: types.BusinessConnection):
-    user_id = connection.user_id
-    save_connection(user_id, connection.connection_id)
-    await bot.send_message(
-        chat_id=user_id,
-        text=(
-            "🔔 **Бизнес-подключение установлено!**\n\n"
-            f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            "Теперь я сохраняю все сообщения из твоих чатов. 🚀"
-        )
-    )
+# ==================== ОБРАБОТЧИКИ BUSINESS API ====================
 
-@dp.business_message()
+# Middleware для обработки бизнес-подключений
+@dp.update.outer_middleware
+async def business_connection_middleware(update: types.Update, handler):
+    """Обработчик бизнес-подключений через middleware"""
+    if update.business_connection:
+        user_id = update.business_connection.user_id
+        connection_id = update.business_connection.connection_id
+        save_connection(user_id, connection_id)
+        await bot.send_message(
+            chat_id=user_id,
+            text=(
+                "🔔 **Бизнес-подключение установлено!**\n\n"
+                f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+                "Теперь я сохраняю все сообщения из твоих чатов. 🚀"
+            )
+        )
+    return await handler(update)
+
+# Обработчик бизнес-сообщений (новые сообщения)
+@dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
+    """Сохраняет все бизнес-сообщения"""
+    if not message.business_message:
+        return
+    
     user_id = message.from_user.id
     text = message.text or message.caption
     
@@ -229,8 +241,10 @@ async def handle_business_message(message: types.Message):
         media_id=media_id
     )
 
+# Обработчик измененных сообщений
 @dp.edited_business_message()
 async def handle_edited_business_message(message: types.Message):
+    """Обрабатывает изменения сообщений"""
     user_id = message.from_user.id
     old_data = get_message(user_id, message.message_id, message.chat.id)
     
@@ -256,8 +270,10 @@ async def handle_edited_business_message(message: types.Message):
             media_id=old_media_id
         )
 
+# Обработчик удаленных сообщений
 @dp.business_messages_deleted()
 async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
+    """Обрабатывает удаление сообщений"""
     user_id = event.user_id
     chat_id = event.chat.id
     deleted_ids = event.message_ids
@@ -298,7 +314,8 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
             
             delete_message(user_id, msg_id, chat_id)
 
-# --- ЗАПУСК ---
+# ==================== ЗАПУСК ====================
+
 async def main():
     init_db()
     logging.info("🚀 MGP3 бот запущен на BotHost!")
