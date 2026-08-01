@@ -159,7 +159,7 @@ async def check_connection(callback: types.CallbackQuery):
         )
     await callback.answer()
 
-# ==================== BUSINESS API ====================
+# ==================== BUSINESS API (РАБОТАЕТ В 3.17.0) ====================
 
 @dp.business_connection()
 async def on_business_connection(connection: BusinessConnection):
@@ -175,7 +175,7 @@ async def on_business_connection(connection: BusinessConnection):
         )
     )
 
-@dp.business_message()
+@dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
     """
     Сохраняет новые бизнес-сообщения.
@@ -228,86 +228,99 @@ async def handle_business_message(message: types.Message):
         media_id=media_id
     )
 
-@dp.edited_business_message()
-async def handle_edited_business_message(message: types.Message):
-    """Обрабатывает изменения сообщений"""
-    user_id = message.from_user.id
-    
-    # Автоматически сохраняем connection_id, если его нет
-    if not get_connection_id(user_id):
-        if message.business_connection_id:
-            save_connection(user_id, message.business_connection_id)
-    
-    old_data = get_message(user_id, message.message_id, message.chat.id)
-    
-    if old_data:
-        old_text, old_media_type, old_media_id = old_data
-        
-        notification = (
-            "✏️ **Сообщение было изменено!**\n\n"
-            f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
-            f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}\n\n"
-            f"Чат: {message.chat.id}\n"
-            f"ID сообщения: {message.message_id}"
-        )
-        
-        await bot.send_message(user_id, notification)
-        
-        save_message(
-            user_id=user_id,
-            message_id=message.message_id,
-            chat_id=message.chat.id,
-            text=message.text or message.caption,
-            media_type=old_media_type,
-            media_id=old_media_id
-        )
+# ==================== MIDDLEWARE ДЛЯ ИЗМЕНЕНИЙ И УДАЛЕНИЙ ====================
 
-@dp.business_messages_deleted()
-async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
-    """Обрабатывает удаление сообщений"""
-    user_id = event.user_id
-    chat_id = event.chat.id
+@dp.update.outer_middleware
+async def business_middleware(handler, event: types.Update, data: dict):
+    """
+    Обрабатывает изменения и удаления через middleware
+    (в aiogram 3.17.0 нет отдельных декораторов для этого)
+    """
     
-    # Автоматически сохраняем connection_id, если его нет
-    if not get_connection_id(user_id):
-        if hasattr(event, 'business_connection_id') and event.business_connection_id:
-            save_connection(user_id, event.business_connection_id)
-    
-    for msg_id in event.message_ids:
-        old_data = get_message(user_id, msg_id, chat_id)
+    # Измененные сообщения
+    if hasattr(event, 'edited_business_message') and event.edited_business_message:
+        message = event.edited_business_message
+        user_id = message.from_user.id
+        
+        # Автоматически сохраняем connection_id, если его нет
+        if not get_connection_id(user_id):
+            if message.business_connection_id:
+                save_connection(user_id, message.business_connection_id)
+        
+        old_data = get_message(user_id, message.message_id, message.chat.id)
         
         if old_data:
-            text, media_type, media_id = old_data
+            old_text, old_media_type, old_media_id = old_data
             
             notification = (
-                "🗑️ **Сообщение было удалено!**\n\n"
-                f"**Текст:**\n{text or 'Медиафайл'}\n\n"
-                f"**Тип медиа:** {media_type or 'Нет'}\n"
-                f"Чат: {chat_id}\n"
-                f"ID сообщения: {msg_id}"
+                "✏️ **Сообщение было изменено!**\n\n"
+                f"**Было:**\n{old_text or 'Медиафайл'}\n\n"
+                f"**Стало:**\n{message.text or message.caption or 'Медиафайл'}\n\n"
+                f"Чат: {message.chat.id}\n"
+                f"ID сообщения: {message.message_id}"
             )
             
-            if media_id:
-                try:
-                    if media_type == "photo":
-                        await bot.send_photo(user_id, media_id, caption=text)
-                    elif media_type == "video":
-                        await bot.send_video(user_id, media_id, caption=text)
-                    elif media_type == "document":
-                        await bot.send_document(user_id, media_id, caption=text)
-                    elif media_type == "voice":
-                        await bot.send_voice(user_id, media_id, caption=text)
-                    elif media_type == "audio":
-                        await bot.send_audio(user_id, media_id, caption=text)
-                    else:
-                        await bot.send_message(user_id, notification)
-                except Exception as e:
-                    logging.error(f"Ошибка отправки медиа: {e}")
-                    await bot.send_message(user_id, notification)
-            else:
-                await bot.send_message(user_id, notification)
+            await bot.send_message(user_id, notification)
             
-            delete_message(user_id, msg_id, chat_id)
+            save_message(
+                user_id=user_id,
+                message_id=message.message_id,
+                chat_id=message.chat.id,
+                text=message.text or message.caption,
+                media_type=old_media_type,
+                media_id=old_media_id
+            )
+        return
+    
+    # Удаленные сообщения
+    if hasattr(event, 'business_messages_deleted') and event.business_messages_deleted:
+        ev = event.business_messages_deleted
+        user_id = ev.user_id
+        chat_id = ev.chat.id
+        
+        # Автоматически сохраняем connection_id, если его нет
+        if not get_connection_id(user_id):
+            if hasattr(ev, 'business_connection_id') and ev.business_connection_id:
+                save_connection(user_id, ev.business_connection_id)
+        
+        for msg_id in ev.message_ids:
+            old_data = get_message(user_id, msg_id, chat_id)
+            
+            if old_data:
+                text, media_type, media_id = old_data
+                
+                notification = (
+                    "🗑️ **Сообщение было удалено!**\n\n"
+                    f"**Текст:**\n{text or 'Медиафайл'}\n\n"
+                    f"**Тип медиа:** {media_type or 'Нет'}\n"
+                    f"Чат: {chat_id}\n"
+                    f"ID сообщения: {msg_id}"
+                )
+                
+                if media_id:
+                    try:
+                        if media_type == "photo":
+                            await bot.send_photo(user_id, media_id, caption=text)
+                        elif media_type == "video":
+                            await bot.send_video(user_id, media_id, caption=text)
+                        elif media_type == "document":
+                            await bot.send_document(user_id, media_id, caption=text)
+                        elif media_type == "voice":
+                            await bot.send_voice(user_id, media_id, caption=text)
+                        elif media_type == "audio":
+                            await bot.send_audio(user_id, media_id, caption=text)
+                        else:
+                            await bot.send_message(user_id, notification)
+                    except Exception as e:
+                        logging.error(f"Ошибка отправки медиа: {e}")
+                        await bot.send_message(user_id, notification)
+                else:
+                    await bot.send_message(user_id, notification)
+                
+                delete_message(user_id, msg_id, chat_id)
+        return
+    
+    return await handler(event, data)
 
 # ==================== ЗАПУСК ====================
 
