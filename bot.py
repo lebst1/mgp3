@@ -146,20 +146,16 @@ async def check_connection(callback: types.CallbackQuery):
         await callback.message.answer("❌ **Подключение не найдено**")
     await callback.answer()
 
-# ==================== MIDDLEWARE (ИСПРАВЛЕННЫЙ) ====================
+# ==================== MIDDLEWARE (ПРАВИЛЬНЫЙ) ====================
 
 @dp.update.outer_middleware
-async def business_handler(handler, event: types.Update, data: dict):
+async def business_middleware(handler, event: types.Update, data: dict):
     """
-    Единый обработчик всех бизнес-событий.
-    
-    ВАЖНО: в aiogram 3.x middleware принимает 3 аргумента:
-    - handler - следующий обработчик
-    - event - объект Update
-    - data - словарь с данными
+    ПРАВИЛЬНЫЙ middleware для aiogram 3.x
+    Принимает 3 аргумента: handler, event, data
     """
     
-    # 1. БИЗНЕС-ПОДКЛЮЧЕНИЕ
+    # Бизнес-подключение
     if event.business_connection:
         user_id = event.business_connection.user_id
         connection_id = event.business_connection.connection_id
@@ -168,9 +164,9 @@ async def business_handler(handler, event: types.Update, data: dict):
             chat_id=user_id,
             text="🔔 **Бизнес-подключение установлено!** 🚀"
         )
-        return  # Завершаем, не передаем дальше
+        return
     
-    # 2. ИЗМЕНЕННЫЕ СООБЩЕНИЯ
+    # Измененные сообщения
     if event.edited_business_message:
         message = event.edited_business_message
         user_id = message.from_user.id
@@ -184,7 +180,7 @@ async def business_handler(handler, event: types.Update, data: dict):
             save_message(user_id, message.message_id, message.chat.id, message.text or message.caption)
         return
     
-    # 3. УДАЛЕННЫЕ СООБЩЕНИЯ
+    # Удаленные сообщения
     if event.business_messages_deleted:
         ev = event.business_messages_deleted
         user_id = ev.user_id
@@ -200,10 +196,10 @@ async def business_handler(handler, event: types.Update, data: dict):
                 delete_message(user_id, msg_id, chat_id)
         return
     
-    # Если ничего из вышеперечисленного — передаем дальше
+    # Передаем дальше
     return await handler(event, data)
 
-# 4. НОВЫЕ БИЗНЕС-СООБЩЕНИЯ
+# Новые бизнес-сообщения
 @dp.message(F.business_message)
 async def handle_business_message(message: types.Message):
     user_id = message.from_user.id
